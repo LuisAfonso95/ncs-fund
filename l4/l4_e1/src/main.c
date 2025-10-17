@@ -9,9 +9,10 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
 /* STEP 6 - Include the header file of printk */
-
+#include <zephyr/sys/printk.h>
 /* STEP 8.1 - Define the macro MAX_NUMBER_FACT that represents the maximum number to calculate its
  * factorial  */
+#define MAX_NUMBER_FACT 10
 
 #define SLEEP_TIME_MS 10 * 60 * 1000
 
@@ -24,16 +25,28 @@ static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 /* STEP 8.2 - Replace the button callback function */
 void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
-	gpio_pin_toggle_dt(&led);
-}
+	int i;
+	long int factorial = 1;
 
+	printk("Calculating the factorials of numbers from 1 to %d:\n", MAX_NUMBER_FACT);
+	for (i = 1; i <= MAX_NUMBER_FACT; i++) {
+		factorial = factorial * i;
+		printk("The factorial of %2d = %ld\n", i, factorial);
+	}
+	printk("_______________________________________________________\n");
+	/*Important note!
+	Code in ISR runs at a high priority, therefore, it should be written with timing in mind.
+	Too lengthy or too complex tasks should not be performed by an ISR, they should be deferred
+	to a thread.
+	*/
+}
 static struct gpio_callback button_cb_data;
 
 int main(void)
 {
 	int ret;
 	/* STEP 7 - Print a simple banner */
-
+	printk("nRF Connect SDK Fundamentals - Lesson 4 - Exercise 1\n");
 	/* Only checking one since led.port and button.port point to the same device, &gpio0 */
 	if (!device_is_ready(led.port)) {
 		return -1;

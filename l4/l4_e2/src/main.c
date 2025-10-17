@@ -10,6 +10,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/sys/printk.h>
 /* STEP 4 - Include the header file of the logger module */
+#include <zephyr/logging/log.h>
 
 #define MAX_NUMBER_FACT 10
 #define SLEEP_TIME_MS	10 * 60 * 1000
@@ -21,7 +22,7 @@ static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET(SW0_NODE, gpios);
 static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 
 /* STEP 5 - Register your code with the logger module */
-
+LOG_MODULE_REGISTER(Less4_Exer2,LOG_LEVEL_DBG);
 
 /* STEP 7 - Replace the callback function button_pressed() */
 void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
@@ -29,18 +30,19 @@ void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t
 	int i;
 	long int factorial = 1;
 
-	printk("Calculating the factorials of numbers from 1 to %d:\n", MAX_NUMBER_FACT);
+    LOG_INF("Calculating the factorials of numbers 1 to %d:",MAX_NUMBER_FACT);
 	for (i = 1; i <= MAX_NUMBER_FACT; i++) {
 		factorial = factorial * i;
-		printk("The factorial of %2d = %ld\n", i, factorial);
+        LOG_INF("The factorial of %2d = %ld",i,factorial);
 	}
-	printk("_______________________________________________________\n");
 	/*Important note!
-	Code in ISR runs at a high priority, therefore, it should be written with timing in mind.
-	Too lengthy or too complex tasks should not be performed by an ISR, they should be deferred
-	to a thread.
+	Code in ISR runs at a high priority, therefore, 
+	it should be written with timing in mind.
+	Too lengthy or too complex tasks should not be performed by an ISR,
+	they should be deferred	to a thread.
 	*/
 }
+
 
 static struct gpio_callback button_cb_data;
 
@@ -48,7 +50,19 @@ int main(void)
 {
 	int ret;
 	/* STEP 6 - Print logging information */
-	
+	int exercise_num = 2;
+	uint8_t data[] = {0x00, 0x01, 0x02, 0x03,
+					0x04, 0x05, 0x06, 0x07,
+					'H', 'e', 'l', 'l','o'};
+	// Printf-like messages
+	LOG_INF("nRF Connect SDK Fundamentals");
+	LOG_INF("Exercise %d",exercise_num);    
+	LOG_DBG("A log message in debug level");
+	LOG_WRN("A log message in warning level!");
+	LOG_ERR("A log message in Error level!");
+	// Hexdump some data
+	LOG_HEXDUMP_INF(data, sizeof(data),"Sample Data!"); 
+
 
 	/* Only checking one since led.port and button.port point to the same device, &gpio0 */
 	if (!device_is_ready(led.port)) {

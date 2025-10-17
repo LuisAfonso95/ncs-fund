@@ -1,0 +1,6 @@
+&uart0 {
+	current-speed = <115200>;
+	data-bits = <8>;
+	stop-bits = "1";
+	parity = "none";
+};
