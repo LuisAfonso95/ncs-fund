@@ -10,7 +10,7 @@
 #define STACKSIZE 1024
 
 /* STEP 5 - Change the priority of thread0 to 6 */
-#define THREAD0_PRIORITY 7
+#define THREAD0_PRIORITY 6
 #define THREAD1_PRIORITY 7
 
 void thread0(void)
