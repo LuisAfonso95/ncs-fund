@@ -1,0 +1,6 @@
+
+source "Kconfig.zephyr"
+
+config CONFIG_BMP280
+    bool "Use BMP280"
+    default n

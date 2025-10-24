@@ -16,12 +16,20 @@
 
 /* STEP 8 - Define the I2C slave device address and the addresses of relevant registers */
 
+#if defined(CONFIG_BMP280)
 #define CHIP_ID  0x58
+#else
+#define CHIP_ID  0x60
+#endif
+
 #define SENSOR_CONFIG_VALUE 0x93
 #define CTRLMEAS 0xF4
 #define CALIB00	 0x88
 #define ID	     0xD0
 #define TEMPMSB	 0xFA
+#define HUM_ADDR 0xFD
+#define HUM_DIG_ADDR1	 0xA1
+#define HUM_DIG_ADDR2	 0xE1
 
 /* STEP 6 - Get the node identifier of the sensor */
 #define I2C_NODE DT_NODELABEL(mysensor)
@@ -32,13 +40,19 @@ struct bme280_data {
 	uint16_t dig_t1;
 	int16_t dig_t2;
 	int16_t dig_t3;
+	uint8_t   dig_H1;
+	int16_t dig_H2;
+	int8_t   dig_H3;
+	int16_t dig_H4;
+	int16_t dig_H5;
+	int8_t   dig_H6 ;
 } bmedata;
 
 
 void bme_calibrationdata(const struct i2c_dt_spec *spec, struct bme280_data *sensor_data_ptr)
 {
 	/* Step 10 - Put calibration function code */
-	uint8_t values[6];
+	uint8_t values[8];
 
 	int ret = i2c_burst_read_dt(spec, CALIB00, values, 6);
 
@@ -49,13 +63,50 @@ void bme_calibrationdata(const struct i2c_dt_spec *spec, struct bme280_data *sen
 	sensor_data_ptr->dig_t1 = ((uint16_t)values[1]) << 8 | values[0];
 	sensor_data_ptr->dig_t2 = ((uint16_t)values[3]) << 8 | values[2];
 	sensor_data_ptr->dig_t3 = ((uint16_t)values[5]) << 8 | values[4];
+
+	ret = i2c_burst_read_dt(spec, HUM_DIG_ADDR1, values, 1);
+	if (ret != 0) {
+		printk("Failed to read register %x \n", CALIB00);
+		return;
+	}
+
+	ret = i2c_burst_read_dt(spec, HUM_DIG_ADDR2, &values[1], 7);
+	if (ret != 0) {
+		printk("Failed to read register %x \n", CALIB00);
+		return;
+	}
+   sensor_data_ptr->dig_H1 =   values[0];
+   sensor_data_ptr->dig_H2 = (values[2] << 8) | values[1];
+   sensor_data_ptr->dig_H3 =   values[3];
+   sensor_data_ptr->dig_H4 = ((int8_t)values[4] * 16) | (0x0F & values[5]);
+   sensor_data_ptr->dig_H5 = ((int8_t)values[6] * 16) | ((values[5] >> 4) & 0x0F);
+   sensor_data_ptr->dig_H6 =   values[7];
 	
 }
 
 /* Compensate current temperature using previously stored sensor calibration data */
-static int32_t bme280_compensate_temp(struct bme280_data *data, int32_t adc_temp)
+static float bme280_calculate_humidity(struct bme280_data *data, int32_t adc_humidity, int32_t t_fine)
+{
+   // Code based on calibration algorthim provided by Bosch.
+   int32_t var1;
+
+
+   var1 = (t_fine - ((int32_t)76800));
+   var1 = (((((adc_humidity << 14) - (((int32_t)data->dig_H4) << 20) - (((int32_t)data->dig_H5) * var1)) +
+   ((int32_t)16384)) >> 15) * (((((((var1 * ((int32_t)data->dig_H6)) >> 10) * (((var1 *
+   ((int32_t)data->dig_H3)) >> 11) + ((int32_t)32768))) >> 10) + ((int32_t)2097152)) *
+   ((int32_t)data->dig_H2) + 8192) >> 14));
+   var1 = (var1 - (((((var1 >> 15) * (var1 >> 15)) >> 7) * ((int32_t)data->dig_H1)) >> 4));
+   var1 = (var1 < 0 ? 0 : var1);
+   var1 = (var1 > 419430400 ? 419430400 : var1);
+   return ((uint32_t)(var1 >> 12))/1024.0;
+}
+
+static int32_t bme280_compensate_temp(struct bme280_data *data, int32_t adc_temp, int32_t *t_fine_p)
 {
 	int32_t var1, var2;
+	int32_t t_fine;
+
 
 	var1 = (((adc_temp >> 3) - ((int32_t)data->dig_t1 << 1)) * ((int32_t)data->dig_t2)) >> 11;
 
@@ -64,8 +115,14 @@ static int32_t bme280_compensate_temp(struct bme280_data *data, int32_t adc_temp
 		 12) *
 		((int32_t)data->dig_t3)) >>
 	       14;
+	t_fine = (var1 + var2);
+	if(t_fine_p != NULL)
+	{
+		*t_fine_p = t_fine;
+	}
 
-	return ((var1 + var2) * 5 + 128) >> 8;
+
+	return ((t_fine) * 5 + 128) >> 8;
 }
 
 int main(void)
@@ -88,7 +145,7 @@ int main(void)
 		printk("Failed to read register %x \n", regs[0]);
 		return -1;
 	}
-
+	printk("Expecting id 0x%x\n", CHIP_ID);
 	if (id != CHIP_ID) {
 		printk("Invalid chip id! %x \n", id);
 		return -1;
@@ -109,7 +166,7 @@ int main(void)
 	while (1) {
 
 		/* STEP 12 - Read the temperature from the sensor */
-		uint8_t temp_val[3] = {0};
+		uint8_t temp_val[3]= {0};
 
 		int ret = i2c_burst_read_dt(&dev_i2c, TEMPMSB, temp_val, 3);
 
@@ -121,8 +178,10 @@ int main(void)
 		/* STEP 12.1 - Put the data read from registers into actual order (see datasheet) */
 		int32_t adc_temp =
 			(temp_val[0] << 12) | (temp_val[1] << 4) | ((temp_val[2] >> 4) & 0x0F);
+		int32_t t_fine;
+
 		/* STEP 12.2 - Compensate temperature */
-		int32_t comp_temp = bme280_compensate_temp(&bmedata, adc_temp);
+		int32_t comp_temp = bme280_compensate_temp(&bmedata, adc_temp, &t_fine);
 		/* STEP 12.3 - Convert temperature */
 		float temperature = (float)comp_temp / 100.0f;
 		double fTemp = (double)temperature * 1.8 + 32;
@@ -130,6 +189,22 @@ int main(void)
 		// Print reading to console
 		printk("Temperature in Celsius : %8.2f C\n", (double)temperature);
 		printk("Temperature in Fahrenheit : %.2f F\n", fTemp);
+
+
+		uint8_t hum_val[2]= {0};
+		ret = i2c_burst_read_dt(&dev_i2c, HUM_ADDR, hum_val, 2);
+		if (ret != 0) {
+			printk("Failed to read register %x \n", TEMPMSB);
+			k_msleep(SLEEP_TIME_MS);
+			continue;
+		}
+		uint32_t rawHumidity = (hum_val[0] << 8) | hum_val[1];
+		printk("Raw Humidity : 0X%x\n", rawHumidity);
+		
+		float humidity=  bme280_calculate_humidity(&bmedata,  rawHumidity, t_fine);
+		printk("Humidity : %f\n", (double)humidity);
+		
+		
 
 		k_msleep(SLEEP_TIME_MS);
 	}
